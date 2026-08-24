@@ -19,7 +19,10 @@ app = Flask(__name__)
 CORS(app)
 
 # Configure SQLite Database with SQLAlchemy
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///diary.db'
+if os.environ.get('VERCEL'):
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/diary.db'
+else:
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///diary.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)

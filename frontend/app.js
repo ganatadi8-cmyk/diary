@@ -1,4 +1,5 @@
-const API_URL = 'http://127.0.0.1:5000/api/entries';
+const BASE_URL = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost' ? 'http://127.0.0.1:5000' : '';
+const API_URL = `${BASE_URL}/api/entries`;
 
 // State Management
 let allEntries = [];
@@ -134,7 +135,7 @@ async function handleAuthSubmit(e) {
   const name = authName.value.trim();
   const password = authPassword.value;
   
-  const endpoint = isLoginMode ? 'http://127.0.0.1:5000/api/login' : 'http://127.0.0.1:5000/api/register';
+  const endpoint = isLoginMode ? `${BASE_URL}/api/login` : `${BASE_URL}/api/register`;
   
   try {
     const response = await fetch(endpoint, {
@@ -471,7 +472,7 @@ async function handleAiAgentRectify() {
     aiStatus.style.display = 'block';
     aiStatus.innerText = "🤖 AI Agent is translating Telugu & rectifying grammar into Indian English...";
 
-    const response = await fetch('http://127.0.0.1:5000/api/ai-agent', {
+    const response = await fetch(`${BASE_URL}/api/ai-agent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, content })
