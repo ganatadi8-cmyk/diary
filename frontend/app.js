@@ -1,502 +1,294 @@
-const BASE_URL = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost' ? 'http://127.0.0.1:5000' : '';
-const API_URL = `${BASE_URL}/api/entries`;
+'use strict';
+const $ = id => document.getElementById(id);
+let user = null;
+let csrf = '';
+let entries = [];
+let selectedDate = localDate(new Date());
+let viewDate = new Date();
+let filterDate = false;
+let editingId = null;
+let loginMode = true;
+let busy = false;
+let dirty = false;
+let suggestion = null;
+let authEpoch = 0;
+let loadSequence = 0;
+let expiredUserId = null;
 
-// State Management
-let allEntries = [];
-let viewYear = new Date().getFullYear();
-let viewMonth = new Date().getMonth(); // 0 - 11
-let selectedDate = formatDateString(new Date()); // YYYY-MM-DD (Defaults to Today)
-let filterBySelected = false; // By default on initial load, show all entries
-
-let currentUser = JSON.parse(localStorage.getItem('user')) || null;
-let isLoginMode = true;
-
-// DOM Elements
-const authModal = document.getElementById('auth-modal');
-const tabLogin = document.getElementById('tab-login');
-const tabRegister = document.getElementById('tab-register');
-const authForm = document.getElementById('auth-form');
-const authName = document.getElementById('auth-name');
-const authPassword = document.getElementById('auth-password');
-const authError = document.getElementById('auth-error');
-const authSubmitBtn = document.getElementById('auth-submit-btn');
-
-const userControls = document.getElementById('user-controls');
-const welcomeMsg = document.getElementById('welcome-msg');
-const logoutBtn = document.getElementById('logout-btn');
-const userView = document.getElementById('user-view');
-const adminView = document.getElementById('admin-view');
-const adminUsersList = document.getElementById('admin-users-list');
-
-const diaryForm = document.getElementById('diary-form');
-const titleInput = document.getElementById('title');
-const contentInput = document.getElementById('content');
-const entriesList = document.getElementById('entries-list');
-const monthYearHeader = document.getElementById('month-year-header');
-const calendarDaysContainer = document.getElementById('calendar-days');
-const prevMonthBtn = document.getElementById('prev-month');
-const nextMonthBtn = document.getElementById('next-month');
-const selectedDateLabel = document.getElementById('selected-date-label');
-const viewingDateLabel = document.getElementById('viewing-date-label');
-const showAllBtn = document.getElementById('show-all-btn');
-const aiAgentBtn = document.getElementById('ai-agent-btn');
-const aiStatus = document.getElementById('ai-status');
-
-// Initialize Application
-document.addEventListener('DOMContentLoaded', () => {
-  setupEventListeners();
-  checkAuth();
-});
-
-function checkAuth() {
-  if (!currentUser) {
-    authModal.style.display = 'flex';
-    userControls.style.display = 'none';
-    userView.style.display = 'none';
-    adminView.style.display = 'none';
-  } else {
-    authModal.style.display = 'none';
-    userControls.style.display = 'flex';
-    welcomeMsg.innerText = `Welcome, ${currentUser.name}!`;
-    
-    if (currentUser.role === 'admin') {
-      userView.style.display = 'none';
-      adminView.style.display = 'block';
-    } else {
-      userView.style.display = 'grid'; // because it uses grid-template-columns
-      adminView.style.display = 'none';
-      updateDateUI();
-    }
-    fetchEntries();
-  }
+function localDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 }
-
-function setupEventListeners() {
-  // Auth Listeners
-  tabLogin.addEventListener('click', () => {
-    isLoginMode = true;
-    tabLogin.classList.add('active');
-    tabRegister.classList.remove('active');
-    authSubmitBtn.innerText = 'Login';
-    authError.style.display = 'none';
+function prettyDate(value) {
+  return new Intl.DateTimeFormat(undefined, {day:'numeric', month:'short', year:'numeric'}).format(new Date(value + 'T12:00:00'));
+}
+function status(message, error = false) {
+  $('app-status').textContent = message;
+  $('app-status').classList.toggle('error', error);
+}
+async function api(path, options = {}) {
+  const response = await fetch('/api' + path, {
+    ...options, credentials: 'same-origin',
+    headers: {'Content-Type':'application/json', 'X-CSRF-Token':csrf, ...options.headers},
+    signal: AbortSignal.timeout(35000)
   });
-
-  tabRegister.addEventListener('click', () => {
-    isLoginMode = false;
-    tabRegister.classList.add('active');
-    tabLogin.classList.remove('active');
-    authSubmitBtn.innerText = 'Register';
-    authError.style.display = 'none';
-  });
-
-  authForm.addEventListener('submit', handleAuthSubmit);
-  
-  logoutBtn.addEventListener('click', () => {
-    localStorage.removeItem('user');
-    currentUser = null;
-    allEntries = [];
-    checkAuth();
-  });
-
-  // Calendar Nav Listeners
-  prevMonthBtn.addEventListener('click', () => {
-    viewMonth--;
-    if (viewMonth < 0) {
-      viewMonth = 11;
-      viewYear--;
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401 && user) {
+      expiredUserId = user.id;
+      user = null; entries = []; authEpoch++;
+      renderAuth();
+      $('auth-error').textContent = 'Your session expired. Sign in again to continue your writing.';
     }
+    const error = new Error(data.error || 'The request could not be completed. Please try again.');
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+function message(error) {
+  return error.name === 'TimeoutError' ? 'The request timed out. Refresh your memories before retrying a save; it may have completed.' :
+    error instanceof TypeError ? 'Connection lost. Your text is still here. Refresh your memories before retrying a save.' : error.message;
+}
+function renderAuth() {
+  $('auth-modal').hidden = !!user;
+  $('app-content').inert = !user;
+  $('user-controls').hidden = !user;
+  $('user-view').hidden = !user;
+  if (user) {
+    $('welcome-msg').textContent = `Hello, ${user.name}`;
     renderCalendar();
-  });
-
-  nextMonthBtn.addEventListener('click', () => {
-    viewMonth++;
-    if (viewMonth > 12 - 1) {
-      viewMonth = 0;
-      viewYear++;
-    }
-    renderCalendar();
-  });
-
-  showAllBtn.addEventListener('click', () => {
-    filterBySelected = false;
-    updateDateUI();
     renderEntries();
-  });
-
-  diaryForm.addEventListener('submit', handleFormSubmit);
-  if (aiAgentBtn) {
-    aiAgentBtn.addEventListener('click', handleAiAgentRectify);
   }
 }
-
-// Auth Handlers
-async function handleAuthSubmit(e) {
-  e.preventDefault();
-  const name = authName.value.trim();
-  const password = authPassword.value;
-  
-  const endpoint = isLoginMode ? `${BASE_URL}/api/login` : `${BASE_URL}/api/register`;
-  
+async function connect() {
+  $('auth-submit-btn').disabled = true;
+  $('retry-connection').hidden = true;
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, password })
-    });
-    
-    const data = await response.json();
-    
-    if (response.ok) {
-      currentUser = data;
-      localStorage.setItem('user', JSON.stringify(currentUser));
-      authName.value = '';
-      authPassword.value = '';
-      authError.style.display = 'none';
-      checkAuth();
-    } else {
-      authError.innerText = data.error || 'Authentication failed';
-      authError.style.display = 'block';
-    }
-  } catch (err) {
-    console.error('Auth error:', err);
-    authError.innerText = 'Network error. Make sure server is running.';
-    authError.style.display = 'block';
+    const data = await api('/session');
+    csrf = data.csrf_token;
+    user = data.user;
+    authEpoch++;
+    renderAuth();
+    $('auth-error').textContent = '';
+    $('auth-submit-btn').disabled = false;
+    $('auth-submit-btn').textContent = loginMode ? 'Sign in' : 'Create account';
+    if (user) await loadEntries();
+  } catch (error) {
+    $('auth-error').textContent = message(error);
+    $('auth-submit-btn').textContent = 'Connect to continue';
+    $('retry-connection').hidden = false;
   }
 }
-
-// Helper: Format Date object to YYYY-MM-DD
-function formatDateString(d) {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+function setMode(login) {
+  loginMode = login;
+  $('tab-login').classList.toggle('active', login);
+  $('tab-register').classList.toggle('active', !login);
+  $('tab-login').setAttribute('aria-pressed', String(login));
+  $('tab-register').setAttribute('aria-pressed', String(!login));
+  $('auth-submit-btn').textContent = login ? 'Sign in' : 'Create account';
+  $('auth-password').autocomplete = login ? 'current-password' : 'new-password';
+  $('auth-password').minLength = login ? 1 : 8;
+  $('password-help').hidden = login;
+  $('auth-error').textContent = '';
 }
-
-// Helper: Convert YYYY-MM-DD to human readable string
-function getDisplayDateLabel(dateStr) {
-  const todayStr = formatDateString(new Date());
-  if (dateStr === todayStr) {
-    return `Today (${dateStr})`;
+$('tab-login').onclick = () => setMode(true);
+$('tab-register').onclick = () => setMode(false);
+$('retry-connection').onclick = connect;
+$('auth-form').onsubmit = async event => {
+  event.preventDefault();
+  $('auth-submit-btn').disabled = true;
+  $('tab-login').disabled = $('tab-register').disabled = true;
+  try {
+    // Refresh the CSRF token before authenticating (also recovers an expired cookie).
+    csrf = (await api('/session')).csrf_token;
+    const data = await api(loginMode ? '/login' : '/register', {method:'POST', body:JSON.stringify({name:$('auth-name').value.trim(), password:$('auth-password').value})});
+    user = {id:data.id, name:data.name};
+    if (expiredUserId !== null && expiredUserId !== user.id) resetEditor();
+    expiredUserId = null;
+    csrf = data.csrf_token;
+    authEpoch++;
+    $('auth-form').reset();
+    $('auth-error').textContent = '';
+    renderAuth();
+    await loadEntries();
+  } catch (error) { $('auth-error').textContent = message(error); }
+  finally { $('auth-submit-btn').disabled = false; $('tab-login').disabled = $('tab-register').disabled = false; }
+};
+$('logout-btn').onclick = async () => {
+  if (busy || (dirty && !confirm('Sign out and discard your unsaved writing?'))) return;
+  setBusy(true);
+  try {
+    await api('/logout', {method:'POST'});
+    authEpoch++;
+    user = null; entries = []; csrf = '';
+    resetEditor();
+    $('search-input').value = '';
+    selectedDate = localDate(new Date()); viewDate = new Date(); filterDate = false;
+    $('entries-list').replaceChildren();
+    status(''); renderAuth();
+    await connect();
+  } catch (error) { status(message(error), true); }
+  finally { setBusy(false); }
+};
+async function loadEntries() {
+  if (!user) return;
+  const epoch = authEpoch;
+  const sequence = ++loadSequence;
+  status('Loading your memories…');
+  try {
+    const result = await api('/entries');
+    if (epoch !== authEpoch || sequence !== loadSequence) return;
+    entries = result;
+    renderCalendar(); renderEntries();
+    status('Your memories are up to date.');
+  } catch (error) {
+    if (epoch === authEpoch && sequence === loadSequence) status(message(error), true);
   }
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dateObj = new Date(y, m - 1, d);
-  return new Intl.DateTimeFormat('en-US', { 
-    month: 'short', 
-    day: 'numeric', 
-    year: 'numeric' 
-  }).format(dateObj);
 }
-
-// Update writing target and viewing labels
-function updateDateUI() {
-  selectedDateLabel.innerText = getDisplayDateLabel(selectedDate);
-  
-  if (filterBySelected) {
-    viewingDateLabel.innerText = getDisplayDateLabel(selectedDate);
-    showAllBtn.style.display = 'inline-block';
-  } else {
-    viewingDateLabel.innerText = 'All Dates';
-    showAllBtn.style.display = 'none';
-  }
-}
-
-// Render Calendar Month & Days
 function renderCalendar() {
-  const firstDateOfMonth = new Date(viewYear, viewMonth, 1);
-  monthYearHeader.innerText = new Intl.DateTimeFormat('en-US', { 
-    month: 'long', 
-    year: 'numeric' 
-  }).format(firstDateOfMonth);
-
-  calendarDaysContainer.innerHTML = '';
-
-  const startDayOfWeek = firstDateOfMonth.getDay(); // 0 is Sun, 6 is Sat
-  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-  const todayStr = formatDateString(new Date());
-
-  // Create set of dates that have entries for O(1) lookup
-  const datesWithEntries = new Set(
-    (Array.isArray(allEntries) ? allEntries : []).map(e => e.date || (e.created_at && e.created_at.split(' ')[0]))
-  );
-
-  // Fill preceding empty slots
-  for (let i = 0; i < startDayOfWeek; i++) {
-    const emptyDiv = document.createElement('div');
-    emptyDiv.className = 'day-cell empty';
-    calendarDaysContainer.appendChild(emptyDiv);
+  $('month-year-header').textContent = new Intl.DateTimeFormat(undefined,{month:'long',year:'numeric'}).format(viewDate);
+  $('selected-date-label').textContent = prettyDate(selectedDate);
+  $('viewing-date-label').textContent = filterDate ? prettyDate(selectedDate) : 'All dates';
+  $('show-all-btn').hidden = !filterDate;
+  $('entry-count').textContent = entries.length;
+  $('day-count').textContent = new Set(entries.map(e => e.date)).size;
+  const container = $('calendar-days'); container.replaceChildren();
+  const year = viewDate.getFullYear(), month = viewDate.getMonth();
+  for (let i=0; i<new Date(year,month,1).getDay(); i++) {
+    const blank = document.createElement('span'); blank.className = 'day-cell empty'; container.append(blank);
   }
-
-  // Populate days of month
-  for (let day = 1; day <= daysInMonth; day++) {
-    const dayDiv = document.createElement('div');
-    dayDiv.className = 'day-cell';
-    dayDiv.innerText = day;
-
-    const dateObj = new Date(viewYear, viewMonth, day);
-    const dateStr = formatDateString(dateObj);
-
-    if (dateStr === todayStr) {
-      dayDiv.classList.add('today');
-    }
-    if (dateStr === selectedDate) {
-      dayDiv.classList.add('active');
-    }
-    if (datesWithEntries.has(dateStr)) {
-      const dot = document.createElement('span');
-      dot.className = 'day-dot';
-      dayDiv.appendChild(dot);
-    }
-
-    // Handle touching/clicking a specific calendar date
-    dayDiv.addEventListener('click', () => {
-      selectedDate = dateStr;
-      filterBySelected = true; // Automatically filter feed to selected day
-      renderCalendar(); // Re-render to highlight active cell
-      updateDateUI();
-      renderEntries();
-      
-      // Smoothly scroll to writing form on smaller screens
-      if (window.innerWidth <= 900) {
-        document.querySelector('.form-card').scrollIntoView({ behavior: 'smooth' });
-      }
-    });
-
-    calendarDaysContainer.appendChild(dayDiv);
+  const dates = new Set(entries.map(e=>e.date));
+  for (let day=1; day<=new Date(year,month+1,0).getDate(); day++) {
+    const date = localDate(new Date(year,month,day));
+    const button = document.createElement('button'); button.type = 'button';
+    button.className = 'day-cell'; button.textContent = day;
+    button.classList.toggle('active', date === selectedDate);
+    button.classList.toggle('today', date === localDate(new Date()));
+    button.setAttribute('aria-pressed', String(date===selectedDate));
+    button.setAttribute('aria-label', prettyDate(date) + (dates.has(date)? ', has entries':''));
+    if (dates.has(date)) { const dot = document.createElement('span'); dot.className='day-dot'; button.append(dot); }
+    button.onclick = () => chooseDate(date);
+    container.append(button);
   }
 }
-
-// API: Fetch Entries from Backend
-async function fetchEntries() {
-  if (!currentUser) return;
-  
-  try {
-    const response = await fetch(API_URL, {
-      headers: { 'X-User-Id': currentUser.id }
-    });
-    
-    const data = await response.json();
-    
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 404) {
-        // Invalid or deleted user session. Force logout.
-        localStorage.removeItem('user');
-        currentUser = null;
-        allEntries = [];
-        checkAuth();
-        return;
-      }
-      throw new Error(data.error || "Server error");
-    }
-    
-    allEntries = data;
-    
-    if (currentUser.role === 'admin') {
-      renderAdminEntries();
-    } else {
-      renderCalendar();
-      renderEntries();
-    }
-  } catch (err) {
-    console.error('Failed to load entries from backend:', err);
-    if (currentUser.role === 'admin') {
-      adminUsersList.innerHTML = `<div class="empty-state">⚠️ Could not connect to server.</div>`;
-    } else {
-      entriesList.innerHTML = `
-        <div class="empty-state">
-          <span class="empty-icon">⚠️</span>
-          <p>Could not connect to the diary server.<br>Please ensure the Flask backend server is running.</p>
-        </div>
-      `;
-    }
-  }
+function chooseDate(date) {
+  if (busy) return;
+  if (editingId && date !== selectedDate && !confirm('Cancel editing this memory and choose another date?')) return;
+  if (editingId && date !== selectedDate) resetEditor();
+  selectedDate = date; filterDate = true;
+  renderCalendar(); renderEntries();
 }
-
-// Render filtered entries to feed (For regular users)
+$('prev-month').onclick = () => { viewDate = new Date(viewDate.getFullYear(),viewDate.getMonth()-1,1); renderCalendar(); };
+$('next-month').onclick = () => { viewDate = new Date(viewDate.getFullYear(),viewDate.getMonth()+1,1); renderCalendar(); };
+$('today-btn').onclick = () => { if (busy) return; chooseDate(localDate(new Date())); viewDate = new Date(selectedDate+'T12:00:00'); renderCalendar(); };
+$('show-all-btn').onclick = () => { filterDate=false; renderCalendar(); renderEntries(); };
+$('refresh-btn').onclick = loadEntries;
+$('search-input').oninput = renderEntries;
 function renderEntries() {
-  entriesList.innerHTML = '';
-  
-  const displayedEntries = filterBySelected 
-    ? allEntries.filter(entry => {
-        const entryDate = entry.date || (entry.created_at && entry.created_at.split(' ')[0]);
-        return entryDate === selectedDate;
-      })
-    : allEntries;
-
-  if (displayedEntries.length === 0) {
-    const emptyMsg = filterBySelected 
-      ? `No diary records written on ${getDisplayDateLabel(selectedDate)} yet.`
-      : "No diary entries recorded yet.";
-    
-    entriesList.innerHTML = `
-      <div class="empty-state">
-        <span class="empty-icon">📝</span>
-        <p>${emptyMsg}<br>Use the form above to capture your thoughts for this day!</p>
-      </div>
-    `;
-    return;
+  const list = $('entries-list'); list.replaceChildren();
+  const query = $('search-input').value.trim().toLocaleLowerCase();
+  const shown = entries.filter(e => (!filterDate || e.date===selectedDate) && (e.title+' '+e.content).toLocaleLowerCase().includes(query));
+  if (!shown.length) {
+    const empty = document.createElement('p'); empty.className='empty-state';
+    empty.textContent = query ? 'No memories match your search.' : 'Your story starts here. Write a little about your day and save your first memory.';
+    list.append(empty); return;
   }
-
-  displayedEntries.forEach(entry => {
-    const entryElement = document.createElement('div');
-    entryElement.className = 'entry-card';
-    entryElement.innerHTML = `
-      <h3>${escapeHtml(entry.title)}</h3>
-      <p>${escapeHtml(entry.content)}</p>
-      <div class="entry-footer">
-        <span class="entry-date">📅 ${entry.created_at}</span>
-        <button class="delete-btn" onclick="deleteEntry(${entry.id})">Delete</button>
-      </div>
-    `;
-    entriesList.appendChild(entryElement);
-  });
-}
-
-// Render Admin Dashboard
-function renderAdminEntries() {
-  adminUsersList.innerHTML = '';
-  const countBadge = document.getElementById('admin-user-count');
-  
-  if (!allEntries || allEntries.length === 0) {
-    if (countBadge) countBadge.innerText = '0 Users';
-    adminUsersList.innerHTML = `<div class="empty-state"><p>No users found in the system yet.</p></div>`;
-    return;
+  for (const entry of shown) {
+    const card = document.createElement('article'); card.className='entry-card';
+    const title = document.createElement('h3'); title.textContent=entry.title;
+    const content = document.createElement('p'); content.textContent=entry.content;
+    const footer = document.createElement('div'); footer.className='entry-footer';
+    const date = document.createElement('time'); date.className='entry-date'; date.dateTime=entry.date; date.textContent=prettyDate(entry.date);
+    const actions = document.createElement('div'); actions.className='entry-actions';
+    const edit = document.createElement('button'); edit.className='secondary-btn'; edit.textContent='Edit'; edit.onclick=()=>editEntry(entry);
+    const remove = document.createElement('button'); remove.className='delete-btn'; remove.textContent='Delete'; remove.onclick=()=>deleteEntry(entry);
+    actions.append(edit,remove); footer.append(date,actions); card.append(title,content,footer); list.append(card);
   }
-  
-  if (countBadge) countBadge.innerText = `${allEntries.length} Users registered`;
-  
-  allEntries.forEach(userData => {
-    const userCard = document.createElement('div');
-    userCard.className = 'admin-user-card';
-    
-    let entriesHtml = '';
-    if (userData.entries.length === 0) {
-      entriesHtml = `<p style="color: var(--text-muted);">No diary entries recorded by this user.</p>`;
-    } else {
-      entriesHtml = `<div class="admin-user-entries">`;
-      userData.entries.forEach(entry => {
-        entriesHtml += `
-          <div class="entry-card">
-            <h3>${escapeHtml(entry.title)}</h3>
-            <p>${escapeHtml(entry.content)}</p>
-            <div class="entry-footer">
-              <span class="entry-date">📅 ${entry.created_at}</span>
-              <button class="delete-btn" onclick="deleteEntry(${entry.id})">Delete</button>
-            </div>
-          </div>
-        `;
-      });
-      entriesHtml += `</div>`;
-    }
-    
-    userCard.innerHTML = `
-      <div class="admin-user-header">
-        👤 ${escapeHtml(userData.user.name)}
-      </div>
-      ${entriesHtml}
-    `;
-    
-    adminUsersList.appendChild(userCard);
-  });
 }
-
-// API: Save new entry with selected calendar date
-async function handleFormSubmit(e) {
-  e.preventDefault();
-
-  const newEntry = {
-    title: titleInput.value.trim(),
-    content: contentInput.value.trim(),
-    date: selectedDate // Attach currently selected calendar date!
-  };
-
+function updateWords() {
+  const text=$('content').value.trim();
+  $('word-count').textContent=`${text ? text.split(/\s+/u).length : 0} words · ${$('content').value.length.toLocaleString()} / 20,000 characters`;
+}
+function edited() { dirty=true; suggestion=null; $('ai-preview').hidden=true; updateWords(); }
+$('title').oninput=edited; $('content').oninput=edited;
+function resetEditor() {
+  $('diary-form').reset(); editingId=null; dirty=false; suggestion=null;
+  $('ai-preview').hidden=true; $('cancel-edit').hidden=true;
+  $('date-status-badge').textContent='New entry'; $('save-btn').textContent='Save entry'; updateWords();
+}
+function editEntry(entry) {
+  if (busy || (dirty && !confirm('Discard unsaved writing and edit this memory?'))) return;
+  editingId=entry.id; selectedDate=entry.date; viewDate=new Date(entry.date+'T12:00:00');
+  $('title').value=entry.title; $('content').value=entry.content;
+  dirty=false; suggestion=null; $('ai-preview').hidden=true;
+  $('date-status-badge').textContent='Editing'; $('cancel-edit').hidden=false; $('save-btn').textContent='Save changes';
+  updateWords(); renderCalendar(); renderEntries(); $('title').focus();
+}
+$('cancel-edit').onclick=()=>{ if (!busy && (!dirty || confirm('Discard your unsaved changes?'))) resetEditor(); };
+$('prompt-btn').onclick=()=>{
+  if (busy) return;
+  if ($('content').value && !confirm('Replace your current text with the writing prompt?')) return;
+  $('content').value='One small thing I want to remember about today is ';
+  edited(); $('content').focus();
+};
+function setBusy(value) {
+  busy=value;
+  for (const id of ['save-btn','ai-agent-btn','title','content','logout-btn','cancel-edit','refresh-btn','apply-ai','dismiss-ai']) $(id).disabled=value;
+}
+$('diary-form').onsubmit=async event=>{
+  event.preventDefault(); if (busy) return;
+  const body={title:$('title').value.trim(),content:$('content').value.trim(),date:selectedDate};
+  if (!body.title || !body.content) { status('Add a title and some thoughts before saving.',true); return; }
+  setBusy(true); ++loadSequence; status('Saving your memory…');
   try {
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'X-User-Id': currentUser.id
-      },
-      body: JSON.stringify(newEntry)
-    });
-
-    if (response.ok) {
-      titleInput.value = '';
-      contentInput.value = '';
-      await fetchEntries(); // Refresh entries & calendar markers
-    } else {
-      const data = await response.json();
-      alert('Failed to save entry: ' + (data.error || 'Server error'));
-    }
-  } catch (err) {
-    console.error('Failed to save entry:', err);
-    alert('Failed to save entry. Make sure backend server is active.');
-  }
-}
-
-// API: Delete entry
-async function deleteEntry(id) {
-  if (!confirm("Are you sure you want to delete this diary entry?")) return;
-
+    const saved=await api('/entries'+(editingId?'/'+editingId:''),{method:editingId?'PUT':'POST',body:JSON.stringify(body)});
+    entries=entries.filter(e=>e.id!==saved.id); entries.push(saved);
+    entries.sort((a,b)=>b.created_at.localeCompare(a.created_at)||b.id-a.id);
+    resetEditor(); renderCalendar(); renderEntries(); status('Saved to your diary.');
+  } catch(error){ status(message(error),true); }
+  finally{setBusy(false);}
+};
+async function deleteEntry(entry) {
+  if (busy || !confirm(`Permanently delete “${entry.title}”?`)) return;
+  setBusy(true); ++loadSequence;
   try {
-    const response = await fetch(`${API_URL}/${id}`, { 
-      method: 'DELETE',
-      headers: { 'X-User-Id': currentUser.id }
-    });
-    if (response.ok) {
-      fetchEntries();
-    }
-  } catch (err) {
-    console.error('Failed to delete entry:', err);
-  }
+    await api('/entries/'+entry.id,{method:'DELETE'});
+    entries=entries.filter(e=>e.id!==entry.id);
+    if(editingId===entry.id) resetEditor();
+    renderCalendar(); renderEntries(); status('Entry deleted.');
+  } catch(error){status(message(error),true);}
+  finally{setBusy(false);}
 }
-
-function escapeHtml(str) {
-  if (!str) return '';
-  return str.replace(/[&<>"']/g, match => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[match]));
-}
-
-// AI Agent: Translate Telugu & Rectify Grammar into Indian English
-async function handleAiAgentRectify() {
-  const title = titleInput.value.trim();
-  const content = contentInput.value.trim();
-
-  if (!title && !content) {
-    alert("Please write some reflections in Telugu or English first for the AI Agent to polish!");
-    return;
-  }
-
+$('export-btn').onclick=async()=>{
+  $('export-btn').disabled=true;
   try {
-    aiAgentBtn.disabled = true;
-    aiStatus.style.display = 'block';
-    aiStatus.innerText = "🤖 AI Agent is translating Telugu & rectifying grammar into Indian English...";
-
-    const response = await fetch(`${BASE_URL}/api/ai-agent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, content })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || "Server processing failed");
-    }
-
-    const data = await response.json();
-    if (data.rectified_title !== undefined) titleInput.value = data.rectified_title;
-    if (data.rectified_content !== undefined) contentInput.value = data.rectified_content;
-
-    aiStatus.innerText = "✨ " + (data.agent_status || "Successfully translated & rectified into Indian English!");
-    setTimeout(() => {
-      aiStatus.style.display = 'none';
-    }, 6000);
-
-  } catch (err) {
-    console.error("AI Agent processing failed:", err);
-    aiStatus.innerText = "⚠️ AI Agent connection error: Make sure backend server is active.";
-    setTimeout(() => { aiStatus.style.display = 'none'; }, 5000);
-  } finally {
-    aiAgentBtn.disabled = false;
-  }
-}
+    const data=await api('/export');
+    const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+    const link=document.createElement('a'); link.href=url; link.download='my-diary-'+localDate(new Date())+'.json';
+    document.body.append(link); link.click(); link.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+    status('Diary exported. Keep the downloaded file private.');
+  }catch(error){status(message(error),true);}
+  finally{$('export-btn').disabled=false;}
+};
+$('ai-agent-btn').onclick=async()=>{
+  if(busy) return;
+  if(!$('content').value.trim()){status('Write something first to get a suggestion.',true);return;}
+  setBusy(true); status('Preparing a writing suggestion…');
+  try {
+    suggestion=await api('/ai-agent',{method:'POST',body:JSON.stringify({title:$('title').value,content:$('content').value})});
+    $('ai-preview-title').textContent=suggestion.rectified_title;
+    $('ai-preview-content').textContent=suggestion.rectified_content;
+    $('ai-preview').hidden=false; status('Review the suggestion. Your original text is unchanged.');
+  }catch(error){status(message(error),true);}
+  finally{setBusy(false);}
+};
+$('apply-ai').onclick=()=>{
+  if(!suggestion || busy) return;
+  $('title').value=suggestion.rectified_title; $('content').value=suggestion.rectified_content;
+  edited(); status('Suggestion applied. Save your entry when you are ready.');
+};
+$('dismiss-ai').onclick=()=>{suggestion=null;$('ai-preview').hidden=true;};
+window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
+// Authentication comes from the server, never from editable browser storage.
+try { localStorage.removeItem('user'); } catch (_) { /* Storage may be disabled. */ }
+connect();

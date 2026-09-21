@@ -23,3 +23,12 @@ backend/instance/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Secrets, runtime data, and test artifacts
+.env
+.env.*
+!.env.example
+.pytest_cache/
+*.sqlite*
+*.db-*
+.vercel/
