@@ -1,0 +1,52 @@
+name: Diary tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: diary
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: diary_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U diary -d diary_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: SQLite regression tests
+        run: python -m pytest -q
+      - name: PostgreSQL regression tests
+        run: python -m pytest -q
+        env:
+          TEST_DATABASE_URL: postgresql://diary:test-only-password@localhost:5432/diary_test
+      - name: JavaScript syntax
+        run: node --check frontend/app.js
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install browser test runtime
+        run: |
+          npm install --no-save --package-lock=false playwright@1.51.1
+          npx playwright install --with-deps chromium
+      - name: Browser journey
+        run: |
+          python -m flask --app backend.app init-db
+          python -m flask --app backend.app run --port 5000 > /tmp/diary-server.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:5000/api/health; then break; fi
+            sleep 1
+          done
+          node tests/browser.cjs
+        env:
+          SECRET_KEY: ci-test-session-key-only-not-for-production

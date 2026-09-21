@@ -3,137 +3,82 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="A beautiful interactive daily diary web application with an intuitive calendar view for capturing your everyday moments.">
-  <title>Daily Diary | Your Personal Reflections</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2">
+  <meta name="theme-color" content="#0f172a">
+  <title>Daily Diary · A little space for you</title>
+  <link rel="stylesheet" href="/style.css?v=6">
+  <script src="/app.js?v=6" defer></script>
 </head>
 <body>
-  <!-- Auth Modal -->
-  <div id="auth-modal" class="auth-modal">
+  <div id="auth-modal" class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-heading">
     <div class="card auth-card">
-      <div class="header-logo auth-logo">
-        <span class="logo-icon">✨</span>
-        <h1>Daily Diary</h1>
-      </div>
+      <p class="eyebrow">YOUR EVERYDAY, REMEMBERED</p>
+      <h1 id="auth-heading">Daily Diary</h1>
+      <p class="subtitle">A little space for your thoughts.</p>
       <div class="auth-tabs">
-        <button type="button" class="auth-tab active" id="tab-login">Login</button>
-        <button type="button" class="auth-tab" id="tab-register">Register</button>
+        <button id="tab-login" class="auth-tab active" type="button" aria-pressed="true">Sign in</button>
+        <button id="tab-register" class="auth-tab" type="button" aria-pressed="false">Create account</button>
       </div>
       <form id="auth-form">
-        <div class="input-group">
-          <input type="text" id="auth-name" placeholder="Your Name" required autocomplete="off">
-        </div>
-        <div class="input-group">
-          <input type="password" id="auth-password" placeholder="Password" required>
-        </div>
-        <div id="auth-error" class="auth-error" style="display:none;"></div>
-        <button type="submit" class="primary-btn auth-submit-btn" id="auth-submit-btn">Login</button>
+        <div class="input-group"><label for="auth-name">Your name</label><input id="auth-name" autocomplete="username" maxlength="100" required></div>
+        <div class="input-group"><label for="auth-password">Password</label><input id="auth-password" type="password" autocomplete="current-password" maxlength="128" required></div>
+        <p id="password-help" class="helper" hidden>Use at least 8 characters. Keep your password somewhere safe.</p>
+        <p id="auth-error" class="auth-error" role="alert"></p>
+        <button id="auth-submit-btn" class="primary-btn auth-submit-btn" disabled>Connecting…</button>
+        <button id="retry-connection" class="secondary-btn" type="button" hidden>Retry connection</button>
       </form>
+      <p class="privacy-note">Your diary is visible only to your account in the app.</p>
     </div>
   </div>
-
-  <div class="app-container">
+  <div class="app-container" id="app-content" inert>
     <header class="app-header">
       <div class="header-top">
-        <div class="header-logo">
-          <span class="logo-icon">✨</span>
-          <h1>Daily Diary</h1>
-        </div>
-        <div id="user-controls" style="display:none;" class="user-controls">
+        <div class="header-logo"><span class="logo-icon" aria-hidden="true">✦</span><h1>Daily Diary</h1></div>
+        <div id="user-controls" class="user-controls" hidden>
           <span id="welcome-msg" class="welcome-msg"></span>
-          <button id="logout-btn" class="secondary-btn logout-btn">Logout</button>
+          <button id="export-btn" class="secondary-btn">Export diary</button>
+          <button id="logout-btn" class="secondary-btn">Sign out</button>
         </div>
       </div>
-      <p class="subtitle">Capture your everyday reflections and revisit memorable moments</p>
+      <p class="subtitle">The small moments make the whole story.</p>
     </header>
-
-    <main class="main-content" id="user-view" style="display: none;">
-      <!-- Left Column: Interactive Calendar -->
-      <section class="calendar-section">
+    <p id="app-status" class="app-status" role="status" aria-live="polite"></p>
+    <main class="main-content" id="user-view" hidden>
+      <aside class="calendar-section">
         <div class="card calendar-card">
+          <p class="eyebrow">MAKE TIME FOR YOURSELF</p>
           <div class="calendar-header">
-            <h2 id="month-year-header">Month Year</h2>
+            <h2 id="month-year-header">Your calendar</h2>
             <div class="calendar-nav">
-              <button id="prev-month" class="icon-btn" title="Previous Month" aria-label="Previous Month">&larr;</button>
-              <button id="next-month" class="icon-btn" title="Next Month" aria-label="Next Month">&rarr;</button>
+              <button id="prev-month" class="icon-btn" aria-label="Previous month">←</button>
+              <button id="next-month" class="icon-btn" aria-label="Next month">→</button>
             </div>
           </div>
-          <div class="weekdays-grid">
-            <div>Sun</div>
-            <div>Mon</div>
-            <div>Tue</div>
-            <div>Wed</div>
-            <div>Thu</div>
-            <div>Fri</div>
-            <div>Sat</div>
-          </div>
-          <div id="calendar-days" class="calendar-days-grid"></div>
-          <div class="calendar-legend">
-            <span class="legend-item"><span class="legend-dot active-dot"></span> Selected Date</span>
-            <span class="legend-item"><span class="legend-dot has-entry-dot"></span> Diary Written</span>
-          </div>
+          <div class="weekdays-grid" aria-hidden="true"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>
+          <div id="calendar-days" class="calendar-days-grid" aria-label="Choose a diary date"></div>
+          <div class="calendar-legend"><span class="legend-item"><span class="legend-dot has-entry-dot"></span> A memory saved</span><button id="today-btn" class="secondary-btn">Today</button></div>
+          <div class="journal-stats"><div><strong id="entry-count">0</strong><span>entries</span></div><div><strong id="day-count">0</strong><span>days remembered</span></div></div>
         </div>
-      </section>
-
-      <!-- Right Column: Diary Writing & Reading -->
-      <section class="diary-section">
-        <!-- Writing Form Card -->
+        <div class="card prompt-card"><p class="eyebrow">A THOUGHT TO BEGIN WITH</p><p>What is one small thing you want to remember about today?</p><button id="prompt-btn" class="secondary-btn">Use this prompt</button></div>
+      </aside>
+      <section class="diary-section" aria-label="Your journal">
         <div class="card form-card">
-          <div class="card-header">
-            <h2 id="form-date-title">Writing Diary for <span class="highlight-date" id="selected-date-label">Today</span></h2>
-            <span class="badge" id="date-status-badge">New Entry</span>
-          </div>
+          <div class="card-header"><h2>A moment for <span class="highlight-date" id="selected-date-label">today</span></h2><span class="badge" id="date-status-badge">New entry</span></div>
           <form id="diary-form">
-            <div class="input-group">
-              <input type="text" id="title" placeholder="What's the highlight of this day?" required autocomplete="off">
-            </div>
-            <div class="input-group">
-              <textarea id="content" placeholder="Pour out your thoughts, reflections, or memorable experiences from today..." rows="5" required></textarea>
-            </div>
-            <div class="agent-controls">
-              <button type="button" id="ai-agent-btn" class="ai-agent-btn" title="Translate Telugu/regional languages & fix grammar into Indian English">
-                <span class="agent-icon">✨</span> AI Agent: Fix & Translate (Telugu ➔ Indian English)
-              </button>
-              <div id="ai-status" class="ai-status-msg" style="display:none;">🤖 AI Agent is translating Telugu & rectifying grammar into Indian English...</div>
-            </div>
-            <div class="form-actions">
-              <button type="submit" class="primary-btn">
-                <span class="btn-icon">✍️</span> Save Entry
-              </button>
-            </div>
+            <div class="input-group"><label for="title">Give this memory a title</label><input id="title" placeholder="A day worth remembering" maxlength="100" required autocomplete="off"></div>
+            <div class="input-group"><label for="content">Your thoughts</label><textarea id="content" placeholder="Start anywhere. Write in English, Telugu, or whichever language feels like you…" rows="7" maxlength="20000" required></textarea><p id="word-count" class="helper">0 words</p></div>
+            <div class="agent-controls"><button type="button" id="ai-agent-btn" class="secondary-btn">✦ Polish & translate to English</button><p class="helper">Optional: this sends the title and text to Google Gemini. You can review the suggestion first.</p></div>
+            <div id="ai-preview" class="ai-preview" hidden><h3>Suggested version</h3><strong id="ai-preview-title"></strong><p id="ai-preview-content"></p><button type="button" id="apply-ai" class="secondary-btn">Apply suggestion</button><button type="button" id="dismiss-ai" class="secondary-btn">Keep original</button></div>
+            <div class="form-actions"><button type="button" id="cancel-edit" class="secondary-btn" hidden>Cancel edit</button><button id="save-btn" type="submit" class="primary-btn">Save entry</button></div>
           </form>
         </div>
-
-        <!-- Previous Entries List Card -->
         <div class="card entries-card">
-          <div class="entries-header-bar">
-            <h2>Entries for <span class="highlight-date" id="viewing-date-label">All Dates</span></h2>
-            <button id="show-all-btn" class="secondary-btn" style="display: none;">Show All Dates</button>
-          </div>
-          <div id="entries-list" class="entries-list">
-            <!-- Entries injected here by app.js -->
-          </div>
+          <div class="entries-header-bar"><h2>Your memories <span class="helper" id="viewing-date-label">All dates</span></h2><button id="show-all-btn" class="secondary-btn" hidden>All dates</button><button id="refresh-btn" class="secondary-btn">Refresh</button></div>
+          <label for="search-input" class="sr-only">Search your entries</label><input id="search-input" type="search" placeholder="Search your memories…" autocomplete="off">
+          <div id="entries-list" class="entries-list" aria-live="polite"></div>
         </div>
       </section>
     </main>
-
-    <!-- Admin Dashboard View -->
-    <main class="admin-view" id="admin-view" style="display: none;">
-      <div class="card admin-card">
-        <div class="card-header">
-          <h2>Admin Dashboard - All Users</h2>
-          <span class="badge" id="admin-user-count">0 Users</span>
-        </div>
-        <div id="admin-users-list" class="admin-users-list">
-          <!-- Users injected here -->
-        </div>
-      </div>
-    </main>
+    <footer class="page-footer">Your words. Your pace. Your diary.</footer>
   </div>
-
-  <script src="app.js?v=5"></script>
 </body>
 </html>
