@@ -32,3 +32,4 @@ Thumbs.db
 *.sqlite*
 *.db-*
 .vercel/
+node_modules/
