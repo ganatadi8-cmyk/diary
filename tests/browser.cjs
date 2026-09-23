@@ -10,9 +10,21 @@ const fs = require('node:fs/promises');
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    // A failed backend startup must leave a useful error and a working retry.
+    await page.route('**/api/session', route => route.fulfill({
+      status: 500, contentType: 'text/plain', body: 'FUNCTION_INVOCATION_FAILED'
+    }), { times: 1 });
     await page.goto('http://127.0.0.1:5000');
-    await page.waitForFunction(() => !document.getElementById('auth-submit-btn').disabled);
+    await page.getByRole('button', { name: 'Retry connection', exact: true }).waitFor();
+    assert.match(await page.locator('#auth-error').innerText(), /service.*unavailable/i);
+    assert.equal(await page.locator('#auth-submit-btn').isDisabled(), true);
     await page.getByRole('button', { name: 'Create account', exact: true }).first().click();
+    assert.match(await page.locator('#auth-error').innerText(), /service.*unavailable/i);
+    assert.equal(await page.locator('#auth-submit-btn').innerText(), 'Connect to continue');
+    await page.getByRole('button', { name: 'Retry connection', exact: true }).click();
+    await page.waitForFunction(() => !document.getElementById('auth-submit-btn').disabled);
+    assert.equal(await page.locator('#auth-error').innerText(), '');
+    assert.equal(await page.getByRole('button', { name: 'Retry connection', exact: true }).isHidden(), true);
     await page.getByLabel('Your name', { exact: true }).fill('Browser Alice');
     await page.getByLabel('Password', { exact: true }).fill('browser-test-password');
     await page.locator('#auth-submit-btn').click();
@@ -64,7 +76,7 @@ const fs = require('node:fs/promises');
     assert.equal(await page.locator('.entry-card').count(), 0, 'New account must not see previous account entries');
     assert.equal(await page.getByLabel('Your thoughts', { exact: true }).inputValue(), '');
     assert.deepEqual(errors, []);
-    console.log('Browser flow passed: register, save, safe text rendering, reload, edit, search, mobile layout, export, failed-save retention, logout, account isolation.');
+    console.log('Browser flow passed: connection failure and retry, register, save, safe text rendering, reload, edit, search, mobile layout, export, failed-save retention, logout, account isolation.');
   } finally {
     await browser.close();
   }

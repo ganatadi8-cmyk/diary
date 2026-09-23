@@ -39,15 +39,23 @@ async function api(path, options = {}) {
       renderAuth();
       $('auth-error').textContent = 'Your session expired. Sign in again to continue your writing.';
     }
-    const error = new Error(data.error || 'The request could not be completed. Please try again.');
+    const fallback = response.status >= 500
+      ? 'The diary service is temporarily unavailable. Please try again shortly.'
+      : 'The request could not be completed. Please try again.';
+    const error = new Error(data.error || fallback);
     error.status = response.status;
     throw error;
   }
   return data;
 }
-function message(error) {
-  return error.name === 'TimeoutError' ? 'The request timed out. Refresh your memories before retrying a save; it may have completed.' :
-    error instanceof TypeError ? 'Connection lost. Your text is still here. Refresh your memories before retrying a save.' : error.message;
+function message(error, saving = false) {
+  let detail;
+  if (error.name === 'TimeoutError') detail = 'The connection timed out.';
+  else if (error instanceof TypeError) detail = 'Could not connect to your diary.';
+  else return error.message;
+  return detail + (saving
+    ? ' Your text is still here. Refresh your memories before retrying; the save may have completed.'
+    : ' Please check your connection and try again.');
 }
 function renderAuth() {
   $('auth-modal').hidden = !!user;
@@ -85,11 +93,11 @@ function setMode(login) {
   $('tab-register').classList.toggle('active', !login);
   $('tab-login').setAttribute('aria-pressed', String(login));
   $('tab-register').setAttribute('aria-pressed', String(!login));
-  $('auth-submit-btn').textContent = login ? 'Sign in' : 'Create account';
+  $('auth-submit-btn').textContent = csrf ? (login ? 'Sign in' : 'Create account') : 'Connect to continue';
   $('auth-password').autocomplete = login ? 'current-password' : 'new-password';
   $('auth-password').minLength = login ? 1 : 8;
   $('password-help').hidden = login;
-  $('auth-error').textContent = '';
+  if (csrf) $('auth-error').textContent = '';
 }
 $('tab-login').onclick = () => setMode(true);
 $('tab-register').onclick = () => setMode(false);
@@ -245,7 +253,7 @@ $('diary-form').onsubmit=async event=>{
     entries=entries.filter(e=>e.id!==saved.id); entries.push(saved);
     entries.sort((a,b)=>b.created_at.localeCompare(a.created_at)||b.id-a.id);
     resetEditor(); renderCalendar(); renderEntries(); status('Saved to your diary.');
-  } catch(error){ status(message(error),true); }
+  } catch(error){ status(message(error, true),true); }
   finally{setBusy(false);}
 };
 async function deleteEntry(entry) {

@@ -2,6 +2,8 @@
 
 A private journal with a calendar, Telugu/English writing, editable entries, search, and JSON export. The frontend is plain HTML/CSS/JavaScript and the API is Flask + SQLAlchemy.
 
+**Deployed site:** <https://diary-ten-alpha.vercel.app>. See the [deployment and database access guide](docs/deployment.md) to finish the Vercel environment settings and verify the backend. A working homepage alone does not confirm that sign-in or storage is ready.
+
 ## Database choice
 
 **PostgreSQL, hosted on Neon, is the recommended production database.** Accounts, entries, and revocable sessions are relational data. PostgreSQL gives them durable storage outside the serverless filesystem. Use Neon's pooled connection URL with the Python `psycopg` driver. Supabase PostgreSQL or another PostgreSQL host also works.
@@ -47,7 +49,9 @@ Open <http://127.0.0.1:5000>. Flask serves both the frontend and API on the same
 
 The repository includes Vercel routing for the static frontend and Flask API. Database provisioning and deployment credentials are separate from this code.
 
-1. In the existing Vercel project, add **Neon** from the Storage/Marketplace area and connect the database to the project. Choose a database region near your Vercel function region. Use separate databases/branches for Preview and Production.
+For the existing `diary` deployment, follow the [project-specific setup guide](docs/deployment.md). It lists the existing Neon database, the two required Vercel variables, redeployment, and database access. Updating GitHub does not populate Vercel's private environment settings.
+
+1. Use the existing Neon database, or provision one for a new installation. You can connect it through Vercel's Storage/Marketplace area or copy its connection string from the Neon console. Choose a database region near your Vercel function region. Use separate databases/branches for Preview and Production.
 2. Set `DATABASE_URL` to the **pooled PostgreSQL connection URL**, keeping its TLS parameters (for example `sslmode=require`). The app accepts `postgres://`, `postgresql://`, or `postgresql+psycopg://` URLs. SQLAlchemy uses `NullPool` so the provider handles pooling across serverless instances.
 3. Add a random `SECRET_KEY` (at least 32 characters) to the corresponding Vercel environment. Generate it with the command above. Vercel sets `VERCEL`, which enables Secure cookies and production validation. On other hosts set `APP_ENV=production`.
 4. In a trusted local terminal, set `.env` to the destination's database URL and run the schema command once **before deployment**:
